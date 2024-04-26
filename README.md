@@ -1,5 +1,12 @@
 [![howler.js](https://s3.amazonaws.com/howler.js/howler-logo.png "howler.js")](https://howlerjs.com)
 
+# DISCLAIMER ⚠️  👀 👀 👀 👀
+This is a fork of the Howler library with a custom fix applied to resolve issues in the latest version of iOS, while the library officially resolves the issue.  When the library fixes the problem, we should install it again normally and remove the reference to this repo.
+
+Sources:
+https://github.com/goldfire/howler.js/issues/1711
+https://forums.developer.apple.com/forums/thread/748001
+
 # Description
 [howler.js](https://howlerjs.com) is an audio library for the modern web. It defaults to [Web Audio API](http://webaudio.github.io/web-audio-api/) and falls back to [HTML5 Audio](https://html.spec.whatwg.org/multipage/embedded-content.html#the-audio-element). This makes working with audio in JavaScript easy and reliable across all platforms.
 
