@@ -36,6 +36,9 @@
     "dist/howler.min.js",
     "dist/howler.core.min.js",
     "dist/howler.spatial.min.js",
+    "dist/howler.filter.min.js",
+    "dist/howler.convolver.min.js",
+    "dist/howler.delay.min.js",
     "LICENSE.md"
   ]
 }
