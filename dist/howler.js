@@ -1,5 +1,5 @@
 /*!
- *  howler.js v2.2.4
+ *  howler.js v3.0.0-dev
  *  howlerjs.com
  *
  *  (c) 2013-2020, James Simpson of GoldFire Studios
@@ -1294,7 +1294,6 @@
      */
     fade: function(from, to, len, id) {
       var self = this;
-
       // If the sound hasn't loaded, add it to the load queue to fade when capable.
       if (self._state !== 'loaded' || self._playLock) {
         self._queue.push({
@@ -2140,12 +2139,19 @@
       sound._node.bufferSource = Howler.ctx.createBufferSource();
       sound._node.bufferSource.buffer = cache[self._src];
 
-      // Connect to the correct node.
+      // Connect the audio graph
+      sound._node.bufferSource.connect(sound._fxInsertIn);
+      
+      // If there's a panner, insert it between fxInsertOut and fxSend
       if (sound._panner) {
-        sound._node.bufferSource.connect(sound._panner);
+        sound._fxInsertOut.connect(sound._panner);
+        sound._panner.connect(sound._fxSend);
       } else {
-        sound._node.bufferSource.connect(sound._node);
+        sound._fxInsertOut.connect(sound._fxSend);
       }
+      
+      // Then connect to main node
+      sound._fxSend.connect(sound._node);
 
       // Setup looping and playback rate.
       sound._node.bufferSource.loop = sound._loop;
@@ -2252,6 +2258,19 @@
         self._node.gain.setValueAtTime(volume, Howler.ctx.currentTime);
         self._node.paused = true;
         self._node.connect(Howler.masterGain);
+
+        // create hooks for FX inserts and send
+        self._fxSend = (typeof Howler.ctx.createGain === 'undefined') ? Howler.ctx.createGainNode() : Howler.ctx.createGain();
+        self._fxInsertIn = (typeof Howler.ctx.createGain === 'undefined') ? Howler.ctx.createGainNode() : Howler.ctx.createGain();
+        self._fxInsertOut = (typeof Howler.ctx.createGain === 'undefined') ? Howler.ctx.createGainNode() : Howler.ctx.createGain();
+        // Connect to the correct node.
+        if (self._panner) {
+          self._fxInsertOut.connect(self._panner);
+        } else {
+          self._fxInsertOut.connect(self._node);
+        }
+        // on initialization, connect input to output
+        self._fxInsertIn.connect(self._fxInsertOut);
       } else if (!Howler.noAudio) {
         // Get an unlocked Audio object from the pool.
         self._node = Howler._obtainHtml5Audio();
@@ -2590,7 +2609,7 @@
 /*!
  *  Spatial Plugin - Adds support for stereo and 3D audio where Web Audio is supported.
  *  
- *  howler.js v2.2.4
+ *  howler.js v3.0.0-dev
  *  howlerjs.com
  *
  *  (c) 2013-2020, James Simpson of GoldFire Studios
@@ -3246,3 +3265,1004 @@
     }
   };
 })();
+
+
+/*
+
+Example of parallel processing, used for time based effects such as reverb and delay
+
+------------------------
+|                       |
+| Howler Audio Context  |
+|                       |
+------------------------
+          |
+          v global (0 to many)
+      ------------          --------------------    
+      | convolver | ------> | master gain node | -----> out
+      ------------          --------------------
+          ^                           ^   
+          |                           |         
+          |  per sound                |       
+       -----------------              |      
+       | convolverSend |              |         
+       -----------------              |       
+                     ^                |          
+                     |                |       
+                     |                |       
+---------------    -----------        |       
+|              |-->| _fxSend |        |
+|              |   -----------        |
+| bufferSource |         _________    |
+|              | ----->  | _node | ----              
+---------------          ---------            
+
+        */  
+
+
+/*!
+ *  Convolver Plugin - Adds support for convolving howls with built-in or custom impulse responses
+ *                     where Web Audio is supported. Convolution is most commonly used to apply 
+ *                     reverb characteristics of a space to an arbitrary sound, but creative effects can
+ *                     also be achieved by convolving your sounds with other audio files. 
+ *                     (http://iub.edu/~emusic/etext/synthesis/chapter4_convolution.shtml)
+ *                     - Plugin by Jack Campbell
+ *  
+ *  howler.js v3.0.0-dev
+ *  howlerjs.com
+ *
+ *  (c) 2013-2017, James Simpson of GoldFire Studios
+ *  goldfirestudios.com
+ * 
+ *
+ *  MIT License
+ */
+
+(function() {
+    
+      'use strict';
+      
+      /** Global Methods **/
+      /***************************************************************************/
+    
+      /**
+       * Load an impulse response and register its name to be used as a convolver
+       * @param  {String} convolverName Name of convolver to connect to
+       * @param  {String} impulseResponse URL of impulse response audio file to load
+       * @param  {Function} callback Callback called when impulse response is loaded
+       * @return {HowlerGlobal}
+       */
+      HowlerGlobal.prototype.addConvolver = function(convolverName, impulseResponse, callback) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self.ctx || !self.ctx.listener) {
+          return self;
+        }
+        if(!self._convolvers) { self._convolvers = {}; }
+        // search if convolver already exists by that name
+        if(self._convolvers[convolverName])
+        {
+            console.warn('A convolver already exists under this name.');
+            return self;
+        }
+
+
+        var xhr = new XMLHttpRequest();
+        if (!impulseResponse) {
+            console.log("Could not find IR at supplied path");
+            return;
+        }
+
+        xhr.open("GET", impulseResponse, true);
+        xhr.responseType = "arraybuffer";
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                if (xhr.status < 300 && xhr.status > 199 || xhr.status === 302) {
+                    Howler.ctx.decodeAudioData(xhr.response, function(buffer) {
+                        // create convolver
+                        var convolver = Howler.ctx.createConvolver();
+                        convolver.connect(Howler.masterGain);
+                        convolver.buffer = buffer;
+                        self._convolvers[convolverName] = convolver;
+                        if(callback)
+                        {
+                            callback();
+                        }
+                    }, function(e) {
+                        if (e) console.log("Error decoding IR audio data" + e);
+                    });
+                }
+            }
+        };
+        xhr.send();
+        return self;
+      };
+
+      /** Group Methods **/
+      /***************************************************************************/
+
+      /**
+       * Add new properties to the core init.
+       * @param  {Function} _super Core init method.
+       * @return {Howl}
+       */
+      Howl.prototype.init = (function(_super) {
+        return function(o) {
+          var self = this;
+        
+          // Setup user-defined default properties.
+          self._convolverVolume = o.convolverVolume || 1.0;
+        
+          // Complete initilization with howler.js core's init function.
+          return _super.call(this, o);
+        };
+      })(Howl.prototype.init);
+
+
+      /**
+       * Connect Howl's FX send to a convolver (created globally)
+       * @param  {String} convolverName Name of convolver to connect to
+       * @param  {Number} sendLevel Amount of gain to send 
+       * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+       * @return {Howl}
+       */
+      Howl.prototype.sendToConvolver = function(convolverName, sendLevel, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+    
+        if (!(self._state === 'loaded' && Howler._convolvers[convolverName]))
+        {
+          self._queue.push({
+            event: 'sendToConvolver',
+            action: function() {
+              self.sendToConvolver(convolverName, sendLevel);
+            }
+          });
+          return self;
+        }
+        // send all sounds in group to the convolver
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+              // if sound doesn't have a convolver send yet, create one
+              if(!sound._convolverSend){
+                  setupConvolverSend(sound);
+              }
+              // connect convolverSend gain node to master convolverNode
+              sound._convolverSend.connect(Howler._convolvers[convolverName]);
+              // set the send level
+              sound._convolverSend.gain.setValueAtTime(sendLevel, Howler.ctx.currentTime);
+          }
+        }
+    
+        return self;
+      };
+    
+      /**
+       * Remove Howl from convolver
+       * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+       * @return {Howl}
+       */
+      Howl.prototype.removeFromConvolver = function(id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+    
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'removeFromConvolver',
+            action: function() {
+              // remove from convolver
+              self.removeFromConvolver();
+            }
+          });
+          return self;
+        }
+    
+        // send all sounds in group to the convolver
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+              // remove from convolver
+              if(sound._convolverSend)
+              {
+                removeConvolverSend(sound);
+              }
+          }
+        }
+    
+        return self;
+      };
+      
+      /**
+       * Get/set the send level for this Howl.
+       * @param  {Float} sendLevel Send level from 0.0 to 1.0.
+       * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+       * @return {Howl/Float}     Returns self or current send level.
+       */
+      Howl.prototype.convolverVolume = function(sendLevel, id) {
+        var self = this;
+        var args = arguments;  
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+
+
+
+        if (typeof id === 'undefined') {
+          if (typeof sendLevel === 'number') {
+            self._convolverVolume = sendLevel;
+          }
+        }
+
+        if(sendLevel === undefined) 
+        { 
+          return self._convolverVolume; 
+        }
+        
+        if (sendLevel >= 0 && sendLevel <= 1) {
+          if (self._state !== 'loaded') {
+            self._queue.push({
+              event: 'setConvolverSendLevel',
+              action: function() {
+                self.convolverVolume(sendLevel);
+              }
+            });
+            return self;
+          }
+          // send all sounds in group to the convolver
+          var ids = self._getSoundIds(id);
+          for (var i=0; i<ids.length; i++) {
+            // Get the sound.
+            var sound = self._soundById(ids[i]);
+          
+            if (sound) {
+                // set sound's convolver send gain node to the gain value
+                if (sound._convolverSend && !sound._muted) {
+                  sound._convolverSend.gain.setValueAtTime(sendLevel, Howler.ctx.currentTime);
+                }
+            }
+          }
+        }
+        return self;
+      };
+
+      /**
+       * Add new properties to the core Sound init.
+       * @param  {Function} _super Core Sound init method.
+       * @return {Sound}
+       */
+      Sound.prototype.init = (function(_super) {
+        return function() {
+          var self = this;
+          var parent = self._parent;
+    
+          // Setup user-defined default properties.
+          self._convolverVolume = parent._convolverVolume;
+    
+          // Complete initilization with howler.js core Sound's init function.
+          _super.call(this);
+        };
+      })(Sound.prototype.init);
+    
+      /**
+       * Override the Sound.reset method to clean up properties from the spatial plugin.
+       * @param  {Function} _super Sound reset method.
+       * @return {Sound}
+       */
+      Sound.prototype.reset = (function(_super) {
+        return function() {
+          var self = this;
+          var parent = self._parent;
+    
+          // Setup user-defined default properties.
+          self._convolverVolume = parent._convolverVolume;
+    
+          // Complete resetting of the sound.
+          return _super.call(this);
+        };
+      })(Sound.prototype.reset);
+    
+      /** Helper Methods **/
+      /***************************************************************************/
+
+      /**
+      * Create a new gain node that attaches to the fx send and can be connected to a convolver
+      * @param  {Sound} sound Specific sound to setup convolver send on.
+      */
+      var setupConvolverSend = function(sound) {
+        // Create the new convolver send gain node.
+        sound._convolverSend = Howler.ctx.createGain();
+        // set default gain node values
+        sound._convolverSend.gain.value = 1.0;
+        // connect sound's gain node to convolver send gain node
+        sound._fxSend.connect(sound._convolverSend);
+        // Update the connections.
+        if (!sound._paused) {
+          sound._parent.pause(sound._id, true).play(sound._id);
+        }
+      };
+
+      /**
+      * Disconnect the sound's convolver send from a convolver
+      * @param  {Sound} sound Specific sound to remove convolver connection on.
+      */
+      var removeConvolverSend = function(sound) {
+        // Disconnect convolver send node
+        sound._convolverSend.disconnect(0);
+
+        // Update the connections.
+        if (!sound._paused) {
+          sound._parent.pause(sound._id, true).play(sound._id);
+        }
+      };
+    })();
+    
+
+/*!
+ *  Filters Plugin - Adds support for filters (lowpass, high pass, band pass, or notch) on individual sounds when using WebAudio.
+ *                 - Jack Campbell jackcampbell@acm.org
+ *  
+ *  howler.js v3.0.0-dev
+ *  howlerjs.com
+ *
+ *  (c) 2013-2017, James Simpson of GoldFire Studios
+ *  goldfirestudios.com
+ *
+ *  MIT License
+ */
+(function() {
+    
+      'use strict';
+    
+      /** Group Methods **/
+      /***************************************************************************/
+    
+      /**
+       * Add new properties to the core init.
+       * @param  {Function} _super Core init method.
+       * @return {Howl}
+       */
+      Howl.prototype.init = (function(_super) {
+        return function(o) {
+          var self = this;
+
+          self._q = o.qFactor || 1.0;
+          self._filterType = o.filterType || 'lowpass';
+          self._frequency = o.frequency || 1000.0;
+
+          // Setup event listeners.
+          self._onqFactor = o.onqFactor ? [{fn: o.onqFactor}] : [];
+          self._onfrequency = o.onfrequency ? [{fn: o.onfrequency}] : [];
+          self._onaddFilter = o.onaddFilter ? [{fn: o.onaddFilter}] : [];
+          self._onfilterType = o.onfilterType ? [{fn: o.onfilterType}] : [];
+    
+          // Complete initilization with howler.js core's init function.
+          return _super.call(this, o);
+        };
+      })(Howl.prototype.init);
+    
+      /**
+      * Sets or gets Q factor for the Howl's filter.
+      * Future Howls will not use this value unless explicitly set.
+      * @param  {Number} q Q Factor, a value between 0.001 - 1000.0; determines resonance peak at cutoff for LPF and HPF or bandwidth for notch and BPF.
+      * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+      * @return {Howl/Number}     Self or current Q value.
+      */
+      Howl.prototype.qFactor = function(q, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+    
+        // If the sound hasn't loaded, add it to the load queue to change q when capable.
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'qFactor',
+            action: function() {
+              self.qFactor(q, id);
+            }
+          });
+    
+          return self;
+        }
+
+        if (typeof id === 'undefined') {
+          if (typeof q === 'number') {
+            self._q = q;
+          } else {
+            return self._q;
+          }
+        }
+
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+            if (typeof q === 'number') {
+              if (sound._node) {
+                self._q = q;
+                if (!sound._filterNode) {
+                  setupFilter(sound);
+                }
+
+                sound._filterNode.Q.value = q;
+                self._emit('qFactor', sound._id);
+              }
+            } else {
+              return sound._q;
+            }
+          }
+        }
+    
+        return self;
+      };
+
+      /**
+      * Helper method to update the frequency of all current Howl filters. Depending on the filter type, this will either be the cutoff (for HPF and LPF)
+      * or center frequency (for notch and BPF).
+      * Future Howls will not use this value unless explicitly set.
+      * @param  {String} f Frequency between 10 and Nyquist.
+      * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+      * @return {Howl/String}     Self or current filter type.
+      */
+      Howl.prototype.filterType = function(type, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+    
+        // If the sound hasn't loaded, add it to the load queue to change q when capable.
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'filterType',
+            action: function() {
+              self.filterType(type, id);
+            }
+          });
+    
+          return self;
+        }
+
+        if (typeof id === 'undefined') {
+          if (type === 'lowpass' ||
+              type === 'highpass'||
+              type === 'bandpass'||
+              type === 'notch') {
+            self._filterType = type;
+          } else {
+            return self._filterType;
+          }
+        }
+
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+            if (type === 'lowpass' ||
+                type === 'highpass'||
+                type === 'bandpass'||
+                type === 'notch') {
+              sound._filterType = type;
+    
+              if (sound._node) {
+    
+                if (!sound._filterNode) {
+                  setupFilter(sound);
+                }
+
+                sound._filterNode.type = type;
+                self._emit('filterType', sound._id);
+              }
+            } else {
+              return sound._filterType;
+            }
+          }
+        }
+    
+        return self;
+      };
+
+      /**
+      * Helper method to update the frequency of current Howl filter. Depending on the filter type, this will either be the cutoff (for HPF and LPF)
+      * or center frequency (for notch and BPF).
+      * Future Howls will not use this value unless explicitly set.
+      * @param  {Number} f Frequency between 10 and Nyquist.
+      * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+      * @return {Howl/Number}     Self or current frequency value.
+      */
+      Howl.prototype.frequency = function(f, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+    
+        // If the sound hasn't loaded, add it to the load queue to change q when capable.
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'frequency',
+            action: function() {
+              self.frequency(f, id);
+            }
+          });
+    
+          return self;
+        }
+
+        if (typeof id === 'undefined') {
+          if (typeof f === 'number'){
+            self._frequency = f;
+          } else {
+            return self._frequency;
+          }
+        }
+
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+            if (typeof f === 'number'){
+              sound._frequency = f;
+    
+              if (sound._node) {
+    
+                if (!sound._filterNode) {
+                  setupFilter(sound);
+                }
+
+                sound._filterNode.frequency.value = f;
+                self._emit('frequency', sound._id);
+              }
+            } else {
+              return sound._frequency;
+            }
+          }
+        }
+    
+        return self;
+      };
+
+      /**
+      * Helper method to update multiple filter parameters at once
+      * filterType is a string describing the type of filter; 'highpass', 'lowpass', 'bandpass', or 'notch'
+      * Q is the quality factor of the filter. Depending on the type, it affects resonance peak at the cutoff or bandwidth
+      * frequency is either the cutoff or center frequency, depending on filter type
+      * @param  {Object} filterParams Object of parameters to set for filter. {filterType: string, Q: number, frequency: number}
+      * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+      * @return {Howl}     Self.
+      */
+      Howl.prototype.addFilter = function(filterParams, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+    
+        // If the sound hasn't loaded, add it to the load queue to change q when capable.
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'addFilter',
+            action: function() {
+              self.addFilter(filterParams, id);
+            }
+          });
+    
+          return self;
+        }
+
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+              if (sound._node) {
+    
+                if (!sound._filterNode) {
+                  setupFilter(sound);
+                }
+                sound._filterNode.frequency.value = filterParams.frequency || sound._frequency;
+                sound._filterNode.Q.value = filterParams.Q || sound._q;
+                sound._filterNode.type = filterParams.filterType || sound._filterType;
+                self._emit('addFilter', sound._id);
+              }
+          }
+        }
+    
+        return self;
+      };
+    
+      /** Single Sound Methods **/
+      /***************************************************************************/
+    
+      /**
+       * Add new properties to the core Sound init.
+       * @param  {Function} _super Core Sound init method.
+       * @return {Sound}
+       */
+      Sound.prototype.init = (function(_super) {
+        return function() {
+          var self = this;
+          var parent = self._parent;
+    
+          // Setup user-defined default properties.
+          self._q = parent._q;
+          self._filterType = parent._filterType;
+          self._frequency = parent._frequency;
+    
+          // Complete initilization with howler.js core Sound's init function.
+          _super.call(this);
+        };
+      })(Sound.prototype.init);
+    
+      /**
+       * Override the Sound.reset method to clean up properties from the filters plugin.
+       * @param  {Function} _super Sound reset method.
+       * @return {Sound}
+       */
+      Sound.prototype.reset = (function(_super) {
+        return function() {
+          var self = this;
+          var parent = self._parent;
+    
+          // Reset all filters plugin properties on this sound.
+          self._q = parent._q;
+          self._filterType = parent._filterType;
+          self._frequency = parent._frequency;
+    
+          // Complete resetting of the sound.
+          return _super.call(this);
+        };
+      })(Sound.prototype.reset);
+    
+      /** Helper Methods **/
+      /***************************************************************************/
+
+      var setupFilter = function(sound) {
+        // Create the new convolver send gain node.
+        sound._filterNode = Howler.ctx.createBiquadFilter();
+        // set default gain node values
+        sound._filterNode.gain.value = 1.0;
+        sound._filterNode.frequency.value = sound._frequency || 1000.0;
+        sound._filterNode.type = sound._filterType || "lowpass";
+        sound._filterNode.Q.value = sound._q || 1.0;
+        // connect sound's gain node to convolver send gain node
+        sound._fxInsertIn.disconnect();
+        sound._fxInsertIn.connect(sound._filterNode);
+        sound._filterNode.connect(sound._fxInsertOut);
+        // Update the connections.
+        if (!sound._paused) {
+          sound._parent.pause(sound._id, true).play(sound._id);
+        }
+      };
+    })();
+    
+
+/*!
+ *  Delay Plugin - Adds support for delay effects on Howlers where Web Audio is supported. 
+ *                 This is a time-based send effect approach.
+ *                 - Jack Campbell jcampbellcodes
+ * 
+ *  howler.js v3.0.0-dev
+ *  howlerjs.com
+ *
+ *  (c) 2013-2017, James Simpson of GoldFire Studios
+ *  goldfirestudios.com
+ * 
+ *
+ *  MIT License
+ */
+
+(function() {
+    
+      'use strict';
+
+
+      /** Group Methods **/
+      /***************************************************************************/
+
+      /**
+       * Add new properties to the core init.
+       * @param  {Function} _super Core init method.
+       * @return {Howl}
+       */
+      Howl.prototype.init = (function(_super) {
+        return function(o) {
+          var self = this;
+        
+          // Setup user-defined default properties.
+          self._delayVolume = o.delayVolume || 1.0;
+          self._delayFeedback = o.delayFeedback || 0.0;
+          self._delayTime = o.delayTime || 0.5;
+
+          // Setup event listeners.
+          self._ondelayVolume = o.ondelayVolume ? [{fn: o.ondelayVolume}] : [];
+          self._ondelayFeedback = o.ondelayFeedback ? [{fn: o.ondelayFeedback}] : [];
+          self._ondelayTime = o.ondelayTime ? [{fn: o.ondelayTime}] : [];
+        
+          // Complete initilization with howler.js core's init function.
+          return _super.call(this, o);
+        };
+      })(Howl.prototype.init);
+
+
+      /**
+      * Get/set the amount of the sound's volume sent to the delay line.
+      * @param  {Number} vol  The delay send amount from 0 to 1.
+      * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+      * @return {Howl/Array}    Returns self or the current delay send value
+      */
+      Howl.prototype.delayVolume = function(vol, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio || vol < 0.0 || vol > 1.0) {
+          return self;
+        }
+    
+        // If the sound hasn't loaded, add it to the load queue to change q when capable.
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'delayVolume',
+            action: function() {
+              self.delayVolume(vol, id);
+            }
+          });
+    
+          return self;
+        }
+
+        if (typeof id === 'undefined') {
+          if (typeof vol === 'number'){
+            self._delayVolume = vol;
+          } else {
+            return self._delayVolume;
+          }
+        }
+
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+            if (typeof vol === 'number'){
+              sound._delayVolume = vol;
+    
+              if (sound._node) {
+    
+                if (!sound._delaySend) {
+                  setupDelay(sound);
+                }
+
+                sound._delaySend.gain.value = vol;
+                self._emit('delayVolume', sound._id);
+              }
+            } else {
+              return sound._delayVolume;
+            }
+          }
+        }
+    
+        return self;
+      };
+
+      /**
+      * Get/set the amount of the delay feedback percent. This affects how many times the delayed signal will repeat
+      * at the set delayTime interval  
+      * @param  {Number} feedback  Normalized percentage of feedback amount from 0.0 to <1.0
+      * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+      * @return {Howl/Array}    Returns self or the current delay feedback value
+      */
+      Howl.prototype.delayFeedback = function(feedback, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio || feedback < 0 || feedback >= 1.0) {
+          return self;
+        }
+    
+        // If the sound hasn't loaded, add it to the load queue to change q when capable.
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'delayFeedback',
+            action: function() {
+              self.delayFeedback(feedback, id);
+            }
+          });
+    
+          return self;
+        }
+
+        if (typeof id === 'undefined') {
+          if (typeof feedback === 'number'){
+            self._delayFeedback = feedback;
+          } else {
+            return self._delayFeedback;
+          }
+        }
+
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+            if (typeof feedback === 'number'){
+              sound._delayFeedback = feedback;
+    
+              if (sound._node) {
+    
+                if (!sound._delayFBNode) {
+                  setupDelay(sound);
+                }
+
+                sound._delayFBNode.gain.value = feedback;
+                self._emit('delayFeedback', sound._id);
+              }
+            } else {
+              return sound._delayFeedback;
+            }
+          }
+        }
+    
+        return self;
+      };
+
+
+     /**
+      * Get/set the delay time. This value determines how long each delayed version of the signal will play.
+      * @param  {Number} time  The delay time from 0 to 5.0
+      * @param  {Number} id (optional) The sound ID. If none is passed, all in group will be updated.
+      * @return {Howl/Array}    Returns self or the current delay time value
+      */
+      Howl.prototype.delayTime = function(time, id) {
+        var self = this;
+    
+        // Stop right here if not using Web Audio.
+        if (!self._webAudio) {
+          return self;
+        }
+    
+        // If the sound hasn't loaded, add it to the load queue to change q when capable.
+        if (self._state !== 'loaded') {
+          self._queue.push({
+            event: 'delayTime',
+            action: function() {
+              self.delayTime(time, id);
+            }
+          });
+    
+          return self;
+        }
+
+        if (typeof id === 'undefined') {
+          if (typeof time === 'number'){
+            self._delayTime = time;
+          } else {
+            return self._delayTime;
+          }
+        }
+
+        var ids = self._getSoundIds(id);
+        for (var i=0; i<ids.length; i++) {
+          // Get the sound.
+          var sound = self._soundById(ids[i]);
+    
+          if (sound) {
+            if (typeof time === 'number'){
+              sound._delayTime = time;
+    
+              if (sound._node) {
+    
+                if (!sound._delayNode) {
+                  setupDelay(sound);
+                }
+
+                sound._delayNode.delayTime.value = time;
+                self._emit('delayTime', sound._id);
+              }
+            } else {
+              return sound._delayTime;
+            }
+          }
+        }
+    
+        return self;
+      };
+
+      /**
+       * Add new properties to the core Sound init.
+       * @param  {Function} _super Core Sound init method.
+       * @return {Sound}
+       */
+      Sound.prototype.init = (function(_super) {
+        return function() {
+          var self = this;
+          var parent = self._parent;
+    
+          // Setup user-defined default properties.
+          self._delayVolume = parent._delayVolume || 1.0;
+          self._delayFeedback = parent._delayFeedback || 0.0;
+          self._delayTime = parent._delayTime || 0.5;
+    
+          // Complete initilization with howler.js core Sound's init function.
+          _super.call(this);
+        };
+      })(Sound.prototype.init);
+    
+      /**
+       * Override the Sound.reset method to clean up properties.
+       * @param  {Function} _super Sound reset method.
+       * @return {Sound}
+       */
+      Sound.prototype.reset = (function(_super) {
+        return function() {
+          var self = this;
+          var parent = self._parent;
+    
+          // Setup user-defined default properties.
+          self._delayVolume = parent._delayVolume || 1.0;
+          self._delayFeedback = parent._delayFeedback || 0.0;
+          self._delayTime = parent._delayTime || 0.5;
+    
+          // Complete resetting of the sound.
+          return _super.call(this);
+        };
+      })(Sound.prototype.reset);
+    
+      /** Helper Methods **/
+      /***************************************************************************/
+
+      var setupDelay = function(sound) {
+        // Create the effects chain
+        sound._delaySend = Howler.ctx.createGain(); // amount of input signal sent to the delay node
+        sound._delayNode = Howler.ctx.createDelay(5.0); // actual delay node
+        sound._delayFBNode = Howler.ctx.createGain(); // attenuated signal is fed back into the delay node
+        // set default gain node values
+        sound._delaySend.gain.value = sound._delayVolume || 1.0;
+        sound._delayNode.delayTime.value = sound._delayTime || 0.5;
+        sound._delayFBNode.gain.value = sound._delayFeedback || 0.0;
+
+        // make connections
+        sound._fxSend.connect(sound._delaySend); // hook into the general fxSend on the sound
+        sound._delaySend.connect(sound._delayNode); // hook the send to the delay
+        sound._delayNode.connect(sound._delayFBNode); // send output of delay to feedback
+        sound._delayFBNode.connect(sound._delayNode); // delay receives an attenuated form of the signal to delay again
+        sound._delayNode.connect(Howler.masterGain); // the accumulated delayed signals are sent to the output
+
+        // Update the connections.
+        if (!sound._paused) {
+          sound._parent.pause(sound._id, true).play(sound._id);
+        }
+      };
+    })();
+    

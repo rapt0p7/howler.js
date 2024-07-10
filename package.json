@@ -1,6 +1,6 @@
 {
   "name": "howler",
-  "version": "2.2.4",
+  "version": "3.0.0-dev",
   "description": "Javascript audio library for the modern web.",
   "homepage": "https://howlerjs.com",
   "keywords": [

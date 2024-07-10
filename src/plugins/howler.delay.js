@@ -3,7 +3,7 @@
  *                 This is a time-based send effect approach.
  *                 - Jack Campbell jcampbellcodes
  * 
- *  howler.js v2.0.4
+ *  howler.js v3.0.0-dev
  *  howlerjs.com
  *
  *  (c) 2013-2017, James Simpson of GoldFire Studios
