@@ -31,6 +31,7 @@
   },
   "main": "dist/howler.js",
   "license": "MIT",
+  "types": "types/index.d.ts",
   "files": [
     "src",
     "dist/howler.js",
