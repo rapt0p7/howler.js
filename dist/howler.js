@@ -1,5 +1,5 @@
 /*!
- *  howler.js v3.0.0-dev
+ *  howler.js v3.0.1-dev
  *  howlerjs.com
  *
  *  (c) 2013-2020, James Simpson of GoldFire Studios
@@ -2609,7 +2609,7 @@
 /*!
  *  Spatial Plugin - Adds support for stereo and 3D audio where Web Audio is supported.
  *  
- *  howler.js v3.0.0-dev
+ *  howler.js v3.0.1-dev
  *  howlerjs.com
  *
  *  (c) 2013-2020, James Simpson of GoldFire Studios
@@ -3308,7 +3308,7 @@ Example of parallel processing, used for time based effects such as reverb and d
  *                     (http://iub.edu/~emusic/etext/synthesis/chapter4_convolution.shtml)
  *                     - Plugin by Jack Campbell
  *  
- *  howler.js v3.0.0-dev
+ *  howler.js v3.0.1-dev
  *  howlerjs.com
  *
  *  (c) 2013-2017, James Simpson of GoldFire Studios
@@ -3618,7 +3618,7 @@ Example of parallel processing, used for time based effects such as reverb and d
  *  Filters Plugin - Adds support for filters (lowpass, high pass, band pass, or notch) on individual sounds when using WebAudio.
  *                 - Jack Campbell jackcampbell@acm.org
  *  
- *  howler.js v3.0.0-dev
+ *  howler.js v3.0.1-dev
  *  howlerjs.com
  *
  *  (c) 2013-2017, James Simpson of GoldFire Studios
@@ -3971,7 +3971,7 @@ Example of parallel processing, used for time based effects such as reverb and d
  *                 This is a time-based send effect approach.
  *                 - Jack Campbell jcampbellcodes
  * 
- *  howler.js v3.0.0-dev
+ *  howler.js v3.0.1-dev
  *  howlerjs.com
  *
  *  (c) 2013-2017, James Simpson of GoldFire Studios

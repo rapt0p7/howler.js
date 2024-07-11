@@ -2,7 +2,7 @@
  *  Filters Plugin - Adds support for filters (lowpass, high pass, band pass, or notch) on individual sounds when using WebAudio.
  *                 - Jack Campbell jackcampbell@acm.org
  *  
- *  howler.js v3.0.0-dev
+ *  howler.js v3.0.1-dev
  *  howlerjs.com
  *
  *  (c) 2013-2017, James Simpson of GoldFire Studios

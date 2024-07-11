@@ -39,7 +39,7 @@ Example of parallel processing, used for time based effects such as reverb and d
  *                     (http://iub.edu/~emusic/etext/synthesis/chapter4_convolution.shtml)
  *                     - Plugin by Jack Campbell
  *  
- *  howler.js v3.0.0-dev
+ *  howler.js v3.0.1-dev
  *  howlerjs.com
  *
  *  (c) 2013-2017, James Simpson of GoldFire Studios

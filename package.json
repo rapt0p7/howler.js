@@ -1,6 +1,6 @@
 {
   "name": "@dominickvale/howler",
-  "version": "3.0.0-dev",
+  "version": "3.0.1-dev",
   "description": "Javascript audio library for the modern web.",
   "homepage": "https://howlerjs.com",
   "keywords": [
