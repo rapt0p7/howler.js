@@ -23,6 +23,12 @@ export interface PannerAttributes {
     rolloffFactor?: number;
 }
 
+export interface FilterAttributes {
+  filterType: BiquadFilterNode,
+  Q: number,
+  frequency: number
+}
+
 export interface HowlListeners {
     /** Fires when the sound has been stopped. The first parameter is the ID of the sound. */
     onstop?: HowlCallback | undefined;
@@ -252,6 +258,17 @@ export class Howl {
 
     pannerAttr(id?: number): PannerAttributes;
     pannerAttr(options: PannerAttributes, id?: number): this;
+
+    qFactor(): number;
+    qFactor(q: number, id?: number): this;
+
+    filterType(): BiquadFilterType;
+    filterType(filter: BiquadFilterType, id?: number): this;
+
+    frequency(): number;
+    frequency(f: number, id?: number): this;
+
+    addFilter(options: FilterAttributes, id?: number): this;
 }
 
 export interface HowlerGlobal {
