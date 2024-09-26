@@ -2635,7 +2635,6 @@
   }
 })();
 
-
 /*!
  *  Spatial Plugin - Adds support for stereo and 3D audio where Web Audio is supported.
  *  
@@ -3295,7 +3294,6 @@
     }
   };
 })();
-
 
 /*
 
